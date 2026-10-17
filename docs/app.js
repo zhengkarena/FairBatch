@@ -162,27 +162,42 @@ async function sendWallet(label, address, abi, functionName, args, value) {
 }
 
 // ───────────── 钱包 ─────────────
+// MetaMask 新版会把错误码包在 data.originalError 里，统一取出来
+const errCode = (e) => e?.code ?? e?.data?.originalError?.code ?? e?.cause?.code;
 async function ensureChain() {
   const eth = window.ethereum;
   if (!eth) return;
   const hex = '0x' + cfg.chainId.toString(16);
   let cur = null;
   try { cur = await eth.request({ method: 'eth_chainId' }); } catch {}
-  if (cur && parseInt(cur, 16) === cfg.chainId) return;
+  if (cur && parseInt(cur, 16) === cfg.chainId) { renderWalletNet(cur); return; }
   try {
     await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] });
   } catch (e) {
-    if (e?.code === 4902 || /Unrecognized|not added|4902/i.test(String(e?.message))) {
-      await eth.request({
-        method: 'wallet_addEthereumChain',
-        params: [{
-          chainId: hex, chainName: cfg.chainName, rpcUrls: [cfg.rpcUrl],
-          nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 },
-          blockExplorerUrls: cfg.explorer ? [cfg.explorer] : undefined,
-        }],
-      });
-    } else throw e;
+    if (errCode(e) === 4001) { renderWalletNet(cur); throw new Error('你在钱包里拒绝了切换网络，请点右上角红色「钱包网络」按钮重试'); }
+    // 钱包里还没有这条链（4902）或其他未知错误：都尝试先添加再切换
+    await eth.request({
+      method: 'wallet_addEthereumChain',
+      params: [{
+        chainId: hex, chainName: cfg.chainName, rpcUrls: [cfg.rpcUrl],
+        nativeCurrency: { name: 'MON', symbol: 'MON', decimals: 18 },
+        blockExplorerUrls: cfg.explorer ? [cfg.explorer] : undefined,
+      }],
+    });
+    try { await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] }); } catch {}
   }
+  try { cur = await eth.request({ method: 'eth_chainId' }); } catch {}
+  renderWalletNet(cur);
+  if (!cur || parseInt(cur, 16) !== cfg.chainId) throw new Error('钱包还没切到 Monad 测试网（链 ID 10143）');
+}
+// 右上角显示「钱包」当前所在网络（左边那个绿色徽章只代表页面自己连上了 RPC）
+function renderWalletNet(cur) {
+  const b = $('walletNet');
+  if (!b) return;
+  b.hidden = false;
+  const id = cur ? parseInt(cur, 16) : null;
+  if (id === cfg.chainId) { b.className = 'badge ok'; b.textContent = '钱包网络：Monad 测试网 ✓'; }
+  else { b.className = 'badge bad'; b.textContent = `钱包在其他网络（链 ID ${id ?? '?'}）· 点我切换`; }
 }
 function setOwner(addr) {
   S.owner = addr || null;
@@ -199,12 +214,13 @@ async function connect(interactive = true) {
     const accs = await eth.request({ method: interactive ? 'eth_requestAccounts' : 'eth_accounts' });
     if (!accs?.length) return;
     S.wallet = createWalletClient({ chain: S.chain, transport: custom(eth) });
-    if (interactive) await ensureChain();
     setOwner(accs[0]);
+    if (interactive) await ensureChain();
+    else { try { renderWalletNet(await eth.request({ method: 'eth_chainId' })); } catch {} }
     if (!S._ethHooked) {
       S._ethHooked = true;
       eth.on?.('accountsChanged', (a) => setOwner(a?.[0]));
-      eth.on?.('chainChanged', () => log('钱包网络已切换'));
+      eth.on?.('chainChanged', (c) => { renderWalletNet(c); log('钱包网络已切换：链 ID ' + parseInt(c, 16)); });
     }
   } catch (e) { log('连接钱包失败：' + errMsg(e), 'err'); if (interactive) toast('连接钱包失败：' + errMsg(e), 'err'); }
 }
@@ -659,6 +675,7 @@ async function init() {
   S.chain = makeChain();
   S.pub = createPublicClient({ chain: S.chain, transport: http(cfg.rpcUrl, { retryCount: 2, retryDelay: 400 }) });
   $('btnConnect').onclick = () => connect(true);
+  $('walletNet').onclick = () => ensureChain().then(() => toast('钱包已切到 Monad 测试网', 'ok')).catch((e) => toast(errMsg(e), 'err'));
   $('btnClearLog').onclick = () => { $('log').innerHTML = ''; };
   loadSession(false);
   if (!isAddress(cfg.sealBatch) || cfg.sealBatch === ZERO) {
