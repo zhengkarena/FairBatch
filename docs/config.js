@@ -9,5 +9,5 @@ export const CONFIG = {
   sealBatch: '0x19680bFf57Ff85C64dAC9cd5Ae3884282f574b60',
   base: '',
   quote: '',
-  onboardGasMON: '0.2', // 入场时转给会话密钥的 MON
+  onboardGasMON: '0.5', // 入场时转给会话密钥的 MON
 };

@@ -75,7 +75,7 @@ export function randomSalt() {
 // Gas limits are explicit (no estimation) so a nonce is never skipped by a failed estimate
 // and concurrent sends from one account stay gap-free. settle is the only heavy call.
 export const GAS = {
-  commit: 200_000n, reveal: 200_000n, claim: 200_000n, settle: 900_000n, cancel: 80_000n, onboard: 300_000n,
+  commit: 130_000n, reveal: 110_000n, claim: 120_000n, settle: 400_000n, cancel: 50_000n, onboard: 300_000n, // 实测最大值 ×1.2~1.3；Monad 按 gas limit 计费，别给太宽
 };
 
 /** Wallet with a local nonce counter; sends are serialized through a promise chain. */
