@@ -5,6 +5,8 @@ export const CONFIG = {
   chainId: 10143,
   chainName: 'Monad Testnet',
   rpcUrl: 'https://testnet-rpc.monad.xyz',
+  // 主 RPC 失败/限流时自动切换（现场大家共用官方 RPC，容易被限流）
+  fallbackRpcs: ['https://rpc.ankr.com/monad_testnet', 'https://monad-testnet.drpc.org', 'https://rpc-testnet.monadinfra.com', 'https://10143.rpc.thirdweb.com'],
   explorer: 'https://testnet.monadexplorer.com',
   sealBatch: '0x19680bFf57Ff85C64dAC9cd5Ae3884282f574b60',
   base: '',

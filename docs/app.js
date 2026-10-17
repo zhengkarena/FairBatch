@@ -1,6 +1,6 @@
 // SealBatch 封盘 前端（无构建，ES module）
 import {
-  createPublicClient, createWalletClient, http, custom, defineChain,
+  createPublicClient, createWalletClient, http, fallback, custom, defineChain,
   encodeAbiParameters, keccak256, parseEther, formatEther, parseUnits, formatUnits, isAddress,
 } from './vendor/viem.js';
 import { privateKeyToAccount, generatePrivateKey } from './vendor/viem.js';
@@ -65,6 +65,12 @@ function txLink(hash) {
   return cfg.explorer ? `<a href="${cfg.explorer}/tx/${hash}" target="_blank" rel="noopener">${short}</a>` : `<span class="mono">${short}</span>`;
 }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+// 主 RPC + 备用 RPC：单个出错/限流自动切到下一个（URL 指定了 ?rpc= 时只用它，便于本地调试）
+function rpcTransport() {
+  const urls = [cfg.rpcUrl, ...((new URLSearchParams(location.search).get('rpc')) ? [] : (cfg.fallbackRpcs || []))];
+  const list = [...new Set(urls)].map((u) => http(u, { retryCount: 1, retryDelay: 300, timeout: 8_000 }));
+  return list.length > 1 ? fallback(list, { retryCount: 2 }) : list[0];
+}
 function log(msg, kind = '', hash = '') {
   const li = document.createElement('li');
   li.innerHTML = `<span class="t">${new Date().toLocaleTimeString()}</span><span class="${kind}">${esc(msg)}</span> ${txLink(hash)}`;
@@ -127,7 +133,7 @@ function loadSession(create = false) {
   }
   if (!pk) return null;
   S.session = privateKeyToAccount(pk);
-  S.sessionWallet = createWalletClient({ account: S.session, chain: S.chain, transport: http(cfg.rpcUrl) });
+  S.sessionWallet = createWalletClient({ account: S.session, chain: S.chain, transport: rpcTransport() });
   $('sessionAddr').textContent = S.session.address;
   return S.session;
 }
@@ -371,7 +377,15 @@ $('btnOnboard').onclick = async () => {
     if (!S.owner) await connect(true);
     if (!S.owner) return;
     const key = loadSession(true);
-    await sendWallet('一键入场', cfg.sealBatch, SEALBATCH_ABI, 'onboard', [key.address], parseEther(String(cfg.onboardGasMON)));
+    const value = parseEther(String(cfg.onboardGasMON));
+    // 换设备/换浏览器：金库已有钱或还在领币冷却期 → 只给本机新会话密钥授权，不重复领币（否则会 Cooldown 失败）
+    const last = await S.pub.readContract({ address: cfg.sealBatch, abi: SEALBATCH_ABI, functionName: 'lastFaucet', args: [S.owner] });
+    const cooling = last > 0n && BigInt(Math.floor(Date.now() / 1000)) < last + 600n;
+    if (cooling || (S.freeBase ?? 0n) > 0n || (S.freeQuote ?? 0n) > 0n) {
+      await sendWallet('授权本机会话密钥', cfg.sealBatch, SEALBATCH_ABI, 'setSessionKey', [key.address], value);
+    } else {
+      await sendWallet('一键入场', cfg.sealBatch, SEALBATCH_ABI, 'onboard', [key.address], value);
+    }
     await refreshAccount();
   } catch (e) { log('入场失败：' + errMsg(e), 'err'); toast('入场失败：' + errMsg(e), 'err'); }
   finally { btn.disabled = false; }
@@ -673,7 +687,7 @@ async function init() {
   await loadConfig();
   $('gasAmt').textContent = cfg.onboardGasMON;
   S.chain = makeChain();
-  S.pub = createPublicClient({ chain: S.chain, transport: http(cfg.rpcUrl, { retryCount: 2, retryDelay: 400 }) });
+  S.pub = createPublicClient({ chain: S.chain, transport: rpcTransport() });
   $('btnConnect').onclick = () => connect(true);
   $('walletNet').onclick = () => ensureChain().then(() => toast('钱包已切到 Monad 测试网', 'ok')).catch((e) => toast(errMsg(e), 'err'));
   $('btnClearLog').onclick = () => { $('log').innerHTML = ''; };

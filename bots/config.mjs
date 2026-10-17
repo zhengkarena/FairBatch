@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
-  createPublicClient, createWalletClient, http, defineChain, encodeAbiParameters, keccak256, toHex,
+  createPublicClient, createWalletClient, http, fallback, defineChain, encodeAbiParameters, keccak256, toHex,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
@@ -36,7 +36,10 @@ export const chain = defineChain({
 });
 // retryCount/retryDelay: viem retries 429 + 5xx + network errors with exponential backoff (delay*2^n).
 // cacheTime 0: viem caches getBlockNumber for pollingInterval (4s) by default, which breaks window tracking.
-const transport = () => http(RPC_URL, { retryCount: 6, retryDelay: 400, timeout: 20_000 });
+// 主 RPC + 备用 RPC（官方 RPC 限流时自动切换）；本地 anvil 不加备用
+const FALLBACK_RPCS = RPC_URL.includes('127.0.0.1') ? [] : (process.env.FALLBACK_RPCS ||
+  'https://rpc.ankr.com/monad_testnet,https://monad-testnet.drpc.org,https://rpc-testnet.monadinfra.com,https://10143.rpc.thirdweb.com').split(',').filter(Boolean);
+const transport = () => fallback([RPC_URL, ...FALLBACK_RPCS].map((u) => http(u, { retryCount: 2, retryDelay: 400, timeout: 15_000 })), { retryCount: 4 });
 export const pub = createPublicClient({ chain, transport: transport(), cacheTime: 0, pollingInterval: 300 });
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
